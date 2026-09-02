@@ -1,0 +1,23 @@
+# Render Blueprint for the dislocator Go backend (Docker).
+# Deploy: Render Dashboard -> New -> Blueprint -> pick this repo.
+# You must set DATABASE_URL (from Neon), FRONTEND_URL (your frontend URL) and
+# ADMIN_PASSWORD in the dashboard when prompted (they are marked sync:false).
+services:
+  - type: web
+    name: dislocator-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /api/health
+    envVars:
+      - key: DATABASE_URL
+        sync: false          # paste your Neon connection string (sslmode=require)
+      - key: JWT_SECRET
+        generateValue: true  # Render generates a strong random secret
+      - key: FRONTEND_URL
+        sync: false          # e.g. https://dislocator.netlify.app
+      - key: ADMIN_LOGIN
+        value: admin
+      - key: ADMIN_PASSWORD
+        sync: false          # set a strong password for the first admin

@@ -1,0 +1,4 @@
+DROP TABLE IF EXISTS dislocation;
+DROP TABLE IF EXISTS imports;
+DROP TABLE IF EXISTS signup_links;
+DROP TABLE IF EXISTS users;

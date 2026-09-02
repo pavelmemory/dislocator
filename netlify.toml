@@ -1,0 +1,13 @@
+# Netlify build settings for the dislocator frontend (Vite SPA).
+# Set the environment variable VITE_API_BASE in the Netlify UI to your backend's
+# public API URL, e.g. https://dislocator-api.onrender.com/api
+[build]
+  base = "frontend"
+  command = "npm run build"
+  publish = "dist"
+
+# SPA fallback (also covered by frontend/public/_redirects for Cloudflare Pages).
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

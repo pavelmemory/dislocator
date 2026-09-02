@@ -1,0 +1,23 @@
+# Local HTTPS reverse proxy for the dislocator prototype.
+# Caddy issues a certificate from its own internal CA for `localhost`,
+# so all traffic is served over HTTPS. Plain HTTP is redirected to HTTPS
+# automatically by Caddy.
+#
+# Routing:
+#   /api/*  -> Go backend (backend:8080)
+#   /*      -> React SPA served by nginx (frontend:80)
+
+localhost {
+	tls internal
+
+	handle /api/* {
+		# Prefix is preserved; the backend router serves routes under /api.
+		reverse_proxy backend:8080
+	}
+
+	handle {
+		reverse_proxy frontend:80
+	}
+
+	encode gzip
+}

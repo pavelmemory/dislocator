@@ -34,6 +34,47 @@ func parseIDList(raw string) []int64 {
 	return out
 }
 
+// vcol is a column selected for the export: its registry metadata, its index
+// within columns.All() (for reading values), and its 1-based output position.
+type vcol struct {
+	meta   columns.Column
+	regIdx int
+	pos    int
+}
+
+// visibleColumns returns the columns to write, in registry order, filtered to
+// the requested keys (comma-separated). № п/п occupies output column 1, so the
+// first data column is at position 2. An empty/absent list means all columns.
+func visibleColumns(param string) []vcol {
+	all := columns.All()
+	var want map[string]bool
+	if s := strings.TrimSpace(param); s != "" {
+		want = make(map[string]bool)
+		for _, tok := range strings.Split(s, ",") {
+			if tok = strings.TrimSpace(tok); tok != "" {
+				want[tok] = true
+			}
+		}
+	}
+	var out []vcol
+	pos := 2
+	for i, c := range all {
+		if want != nil && !want[c.Key] {
+			continue
+		}
+		out = append(out, vcol{meta: c, regIdx: i, pos: pos})
+		pos++
+	}
+	if len(out) == 0 { // nothing matched → fall back to all columns
+		pos = 2
+		for i, c := range all {
+			out = append(out, vcol{meta: c, regIdx: i, pos: pos})
+			pos++
+		}
+	}
+	return out
+}
+
 // Export streams the filtered/sorted rows (no pagination) as an .xlsx file that
 // mirrors the source format: a two-row header with the ВРП ВУ-23 / ВРП ВУ-36
 // groups, native date cells, and a leading "№ п/п" column numbered from 1.
@@ -69,7 +110,12 @@ func (a *API) Export(w http.ResponseWriter, r *http.Request) {
 	sheet := parser.SheetName // "Висновок"
 	f.SetSheetName(f.GetSheetName(0), sheet)
 
-	cols := columns.All()
+	// Determine which columns to include. The frontend passes `columns` = the
+	// user's currently visible column keys; hidden columns are omitted. Order is
+	// the original registry order (regardless of the order the keys arrive in),
+	// so the source file layout — including the group headers — stays stable.
+	// Absent/empty `columns` means all columns.
+	vcols := visibleColumns(r.URL.Query().Get("columns"))
 
 	// Number-format styles for date / datetime columns.
 	dateFmt := "dd.mm.yyyy"
@@ -104,36 +150,31 @@ func (a *API) Export(w http.ResponseWriter, r *http.Request) {
 	setCell(1, 1, "№ п/п")
 	mergeRange(1, 1, 1, 2)
 
-	for i := 0; i < len(cols); {
-		c := cols[i]
-		if c.Group == nil {
+	for i := 0; i < len(vcols); {
+		c := vcols[i]
+		if c.meta.Group == nil {
 			// Standalone column: label spans both header rows.
-			setCell(c.XlsxCol, 1, c.Label)
-			mergeRange(c.XlsxCol, 1, c.XlsxCol, 2)
+			setCell(c.pos, 1, c.meta.Label)
+			mergeRange(c.pos, 1, c.pos, 2)
 			i++
 			continue
 		}
 		// Grouped run: group label on row 1 spanning the run; sub-labels on row 2.
-		g := *c.Group
+		g := *c.meta.Group
 		start := i
-		for i < len(cols) && cols[i].Group != nil && *cols[i].Group == g {
+		for i < len(vcols) && vcols[i].meta.Group != nil && *vcols[i].meta.Group == g {
 			i++
 		}
 		end := i - 1
-		setCell(cols[start].XlsxCol, 1, g)
-		mergeRange(cols[start].XlsxCol, 1, cols[end].XlsxCol, 1)
+		setCell(vcols[start].pos, 1, g)
+		mergeRange(vcols[start].pos, 1, vcols[end].pos, 1)
 		for j := start; j <= end; j++ {
-			setCell(cols[j].XlsxCol, 2, cols[j].Label)
+			setCell(vcols[j].pos, 2, vcols[j].meta.Label)
 		}
 	}
 
-	// Style header block A1:.. row 2.
-	lastCol := 1
-	for _, c := range cols {
-		if c.XlsxCol > lastCol {
-			lastCol = c.XlsxCol
-		}
-	}
+	// Style header block A1:..row 2.
+	lastCol := 1 + len(vcols)
 	h1, _ := excelize.CoordinatesToCellName(1, 1)
 	h2, _ := excelize.CoordinatesToCellName(lastCol, 2)
 	_ = f.SetCellStyle(sheet, h1, h2, headerStyle)
@@ -148,16 +189,16 @@ func (a *API) Export(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		setCell(1, rowIdx, n) // № п/п
-		for i, c := range cols {
-			v := vals[i+1] // vals[0] = id
+		for _, c := range vcols {
+			v := vals[c.regIdx+1] // vals[0] = id
 			if v == nil {
 				continue
 			}
-			axis, _ := excelize.CoordinatesToCellName(c.XlsxCol, rowIdx)
+			axis, _ := excelize.CoordinatesToCellName(c.pos, rowIdx)
 			switch t := v.(type) {
 			case time.Time:
 				_ = f.SetCellValue(sheet, axis, t)
-				if c.Type == columns.TypeDate {
+				if c.meta.Type == columns.TypeDate {
 					_ = f.SetCellStyle(sheet, axis, axis, styleDate)
 				} else {
 					_ = f.SetCellStyle(sheet, axis, axis, styleDateTime)

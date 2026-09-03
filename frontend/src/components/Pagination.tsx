@@ -23,10 +23,10 @@ export default function Pagination({
     <div className="pagination">
       <div className="pagination-info">
         {total === 0 ? (
-          <span>Нет записей</span>
+          <span>Немає записів</span>
         ) : (
           <span>
-            Показаны <strong>{from}</strong>–<strong>{to}</strong> из{' '}
+            Показано <strong>{from}</strong>–<strong>{to}</strong> з{' '}
             <strong>{total}</strong>
           </span>
         )}
@@ -34,7 +34,7 @@ export default function Pagination({
 
       <div className="pagination-controls">
         <label className="page-size">
-          Строк на странице:
+          Рядків на сторінці:
           <select
             value={pageSize}
             onChange={(e) => onPageSizeChange(Number(e.target.value))}
@@ -51,6 +51,7 @@ export default function Pagination({
           <button
             type="button"
             className="btn btn-sm"
+            title="Перша"
             disabled={page <= 1}
             onClick={() => onPageChange(1)}
           >
@@ -59,17 +60,19 @@ export default function Pagination({
           <button
             type="button"
             className="btn btn-sm"
+            title="Попередня"
             disabled={page <= 1}
             onClick={() => onPageChange(page - 1)}
           >
             ‹
           </button>
           <span className="page-indicator">
-            Стр. {page} из {totalPages}
+            Стор. {page} з {totalPages}
           </span>
           <button
             type="button"
             className="btn btn-sm"
+            title="Наступна"
             disabled={page >= totalPages}
             onClick={() => onPageChange(page + 1)}
           >
@@ -78,6 +81,7 @@ export default function Pagination({
           <button
             type="button"
             className="btn btn-sm"
+            title="Остання"
             disabled={page >= totalPages}
             onClick={() => onPageChange(totalPages)}
           >

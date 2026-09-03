@@ -1,5 +1,16 @@
-// Package query builds parameterized SQL for GET /api/data from request
-// parameters, using only whitelisted column keys from the registry.
+// Package query builds parameterized SQL for GET /api/data and the xlsx export.
+//
+// Filtering is limited to two fields:
+//   - wagons: a set of № вагона (wagon_number) values.
+//   - operation_date, only in "period" mode, as an inclusive date range.
+//
+// Two modes:
+//   - "current" (default) — поточна дислокація: the single most recent row per
+//     wagon (DISTINCT ON wagon_number, latest operation_date).
+//   - "period" — дислокація за період: every row whose operation_date falls in
+//     [date_from, date_to] (inclusive).
+//
+// Ordering is always wagon_number ASC, then operation_date ASC.
 package query
 
 import (
@@ -19,23 +30,15 @@ var allowedPageSizes = map[int]bool{25: true, 50: true, 100: true, 200: true}
 
 // Built is a fully constructed query.
 type Built struct {
-	// DataSQL selects id + all columns with WHERE/ORDER/LIMIT/OFFSET.
-	DataSQL string
-	// CountSQL counts all matching rows (WHERE only).
+	DataSQL  string
 	CountSQL string
-	// Args are positional args for the WHERE clause ($1..$n). They are shared
-	// by DataSQL and CountSQL (DataSQL appends LIMIT/OFFSET as literals).
+	// Args are positional args ($1..$n) shared by DataSQL and CountSQL.
 	Args     []interface{}
 	Page     int
 	PageSize int
 }
 
-type sortSpec struct {
-	key string
-	dir string // "ASC" | "DESC"
-}
-
-// Build constructs the query from url values.
+// Build constructs the paginated data query and its matching count query.
 func Build(vals url.Values) Built {
 	page := 1
 	if p, err := strconv.Atoi(vals.Get("page")); err == nil && p > 0 {
@@ -46,21 +49,21 @@ func Build(vals url.Values) Built {
 		pageSize = ps
 	}
 
-	where, args := buildWhere(vals)
-	orderBy := buildOrderBy(vals.Get("sort"))
+	conds, args := buildConditions(vals)
+	where := whereClause(conds)
+	current := isCurrent(vals)
 
-	selectCols := selectList()
-	whereSQL := ""
-	if where != "" {
-		whereSQL = " WHERE " + where
-	}
-
+	core := coreSelect(current, where)
 	offset := (page - 1) * pageSize
-	dataSQL := fmt.Sprintf(
-		"SELECT %s FROM %s%s ORDER BY %s LIMIT %d OFFSET %d",
-		selectCols, Table, whereSQL, orderBy, pageSize, offset,
-	)
-	countSQL := fmt.Sprintf("SELECT COUNT(*) FROM %s%s", Table, whereSQL)
+	dataSQL := fmt.Sprintf("%s LIMIT %d OFFSET %d", core, pageSize, offset)
+
+	var countSQL string
+	if current {
+		// One row per wagon → count distinct wagons matching the filter.
+		countSQL = fmt.Sprintf("SELECT COUNT(DISTINCT wagon_number) FROM %s%s", Table, where)
+	} else {
+		countSQL = fmt.Sprintf("SELECT COUNT(*) FROM %s%s", Table, where)
+	}
 
 	return Built{
 		DataSQL:  dataSQL,
@@ -71,17 +74,12 @@ func Build(vals url.Values) Built {
 	}
 }
 
-// BuildExport builds SQL selecting id + all columns for every row matching the
-// same filters and sort as Build, but without pagination (used by xlsx export).
+// BuildExport builds SQL selecting id + all columns for every matching row
+// (no pagination), honoring the same filters/mode/order as Build.
 func BuildExport(vals url.Values) (string, []interface{}) {
-	where, args := buildWhere(vals)
-	orderBy := buildOrderBy(vals.Get("sort"))
-	whereSQL := ""
-	if where != "" {
-		whereSQL = " WHERE " + where
-	}
-	sql := fmt.Sprintf("SELECT %s FROM %s%s ORDER BY %s", selectList(), Table, whereSQL, orderBy)
-	return sql, args
+	conds, args := buildConditions(vals)
+	where := whereClause(conds)
+	return coreSelect(isCurrent(vals), where), args
 }
 
 // BuildExportByIDs builds SQL selecting id + all columns for the given row ids,
@@ -89,6 +87,84 @@ func BuildExport(vals url.Values) (string, []interface{}) {
 func BuildExportByIDs(ids []int64) (string, []interface{}) {
 	sql := fmt.Sprintf("SELECT %s FROM %s WHERE id = ANY($1) ORDER BY id", selectList(), Table)
 	return sql, []interface{}{ids}
+}
+
+// coreSelect returns the ordered, un-paginated SELECT for the given mode.
+func coreSelect(current bool, where string) string {
+	cols := selectList()
+	if current {
+		inner := fmt.Sprintf(
+			"SELECT DISTINCT ON (wagon_number) %s FROM %s%s ORDER BY wagon_number, operation_date DESC NULLS LAST",
+			cols, Table, where,
+		)
+		return fmt.Sprintf("SELECT * FROM (%s) t ORDER BY wagon_number ASC, operation_date ASC", inner)
+	}
+	return fmt.Sprintf(
+		"SELECT %s FROM %s%s ORDER BY wagon_number ASC, operation_date ASC NULLS LAST",
+		cols, Table, where,
+	)
+}
+
+// isCurrent reports whether the request is in "current" mode (the default).
+func isCurrent(vals url.Values) bool {
+	return vals.Get("mode") != "period"
+}
+
+func whereClause(conds []string) string {
+	if len(conds) == 0 {
+		return ""
+	}
+	return " WHERE " + strings.Join(conds, " AND ")
+}
+
+// buildConditions builds the WHERE conditions and positional args, in a
+// deterministic order so DataSQL and CountSQL can share the same args.
+func buildConditions(vals url.Values) ([]string, []interface{}) {
+	var conds []string
+	var args []interface{}
+	ph := func(v interface{}) string {
+		args = append(args, v)
+		return "$" + strconv.Itoa(len(args))
+	}
+
+	if wagons := parseWagons(vals.Get("wagons")); len(wagons) > 0 {
+		conds = append(conds, "wagon_number = ANY("+ph(wagons)+")")
+	}
+
+	if !isCurrent(vals) {
+		if f := strings.TrimSpace(vals.Get("date_from")); f != "" {
+			if t, ok := parseDay(f); ok {
+				conds = append(conds, "operation_date >= "+ph(t))
+			}
+		}
+		if to := strings.TrimSpace(vals.Get("date_to")); to != "" {
+			if t, ok := parseDay(to); ok {
+				conds = append(conds, "operation_date <= "+ph(endOfDay(t)))
+			}
+		}
+	}
+
+	return conds, args
+}
+
+// parseWagons parses a comma-separated list of wagon numbers into a
+// deduplicated []int64 (non-numeric tokens are ignored).
+func parseWagons(raw string) []int64 {
+	seen := make(map[int64]bool)
+	var out []int64
+	for _, tok := range strings.Split(raw, ",") {
+		tok = strings.TrimSpace(tok)
+		if tok == "" {
+			continue
+		}
+		n, err := strconv.ParseInt(tok, 10, 64)
+		if err != nil || seen[n] {
+			continue
+		}
+		seen[n] = true
+		out = append(out, n)
+	}
+	return out
 }
 
 func selectList() string {
@@ -103,84 +179,6 @@ func quoteIdent(id string) string {
 	return `"` + strings.ReplaceAll(id, `"`, `""`) + `"`
 }
 
-// buildWhere returns the WHERE body (without the WHERE keyword) and args.
-func buildWhere(vals url.Values) (string, []interface{}) {
-	var clauses []string
-	var args []interface{}
-	ph := func(v interface{}) string {
-		args = append(args, v)
-		return "$" + strconv.Itoa(len(args))
-	}
-
-	for _, col := range columns.All() {
-		ident := quoteIdent(col.Key)
-		switch col.Search {
-		case "multi":
-			raw := vals.Get("f_" + col.Key)
-			if raw == "" {
-				continue
-			}
-			values := splitValues(raw)
-			var ors []string
-			for _, v := range values {
-				v = strings.TrimSpace(v)
-				if v == "" {
-					continue
-				}
-				if col.Type == columns.TypeInteger {
-					if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-						ors = append(ors, ident+" = "+ph(n))
-					}
-					// non-numeric values are ignored
-				} else {
-					ors = append(ors, ident+" ILIKE "+ph("%"+v+"%"))
-				}
-			}
-			if len(ors) > 0 {
-				clauses = append(clauses, "("+strings.Join(ors, " OR ")+")")
-			}
-
-		case "range":
-			from := strings.TrimSpace(vals.Get("f_" + col.Key + "_from"))
-			to := strings.TrimSpace(vals.Get("f_" + col.Key + "_to"))
-			single := strings.TrimSpace(vals.Get("f_" + col.Key))
-
-			var conds []string
-			if from != "" || to != "" {
-				if from != "" {
-					if t, ok := parseDay(from); ok {
-						conds = append(conds, ident+" >= "+ph(t))
-					}
-				}
-				if to != "" {
-					if t, ok := parseDay(to); ok {
-						conds = append(conds, ident+" <= "+ph(upperBound(col, t)))
-					}
-				}
-			} else if single != "" {
-				if t, ok := parseDay(single); ok {
-					conds = append(conds, ident+" >= "+ph(t))
-					conds = append(conds, ident+" <= "+ph(upperBound(col, t)))
-				}
-			}
-			if len(conds) > 0 {
-				clauses = append(clauses, "("+strings.Join(conds, " AND ")+")")
-			}
-		}
-	}
-
-	return strings.Join(clauses, " AND "), args
-}
-
-// upperBound returns the inclusive upper bound for a day. For datetime columns
-// it is the end of the day; for date columns it is the day itself.
-func upperBound(col columns.Column, day time.Time) time.Time {
-	if col.Type == columns.TypeDateTime {
-		return time.Date(day.Year(), day.Month(), day.Day(), 23, 59, 59, int(999*time.Millisecond), time.UTC)
-	}
-	return day
-}
-
 func parseDay(s string) (time.Time, bool) {
 	t, err := time.Parse("2006-01-02", s)
 	if err != nil {
@@ -189,49 +187,6 @@ func parseDay(s string) (time.Time, bool) {
 	return t, true
 }
 
-// splitValues splits a comma-separated filter value.
-func splitValues(s string) []string {
-	return strings.Split(s, ",")
-}
-
-func buildOrderBy(sortParam string) string {
-	specs := parseSort(sortParam)
-	if len(specs) == 0 {
-		return "id ASC"
-	}
-	var parts []string
-	for _, s := range specs {
-		if s.key == "id" {
-			parts = append(parts, "id "+s.dir)
-		} else {
-			parts = append(parts, quoteIdent(s.key)+" "+s.dir)
-		}
-	}
-	return strings.Join(parts, ", ")
-}
-
-func parseSort(sortParam string) []sortSpec {
-	if strings.TrimSpace(sortParam) == "" {
-		return nil
-	}
-	var out []sortSpec
-	for _, tok := range strings.Split(sortParam, ",") {
-		tok = strings.TrimSpace(tok)
-		if tok == "" {
-			continue
-		}
-		key := tok
-		dir := "ASC"
-		if i := strings.IndexByte(tok, ':'); i >= 0 {
-			key = strings.TrimSpace(tok[:i])
-			d := strings.ToLower(strings.TrimSpace(tok[i+1:]))
-			if d == "desc" {
-				dir = "DESC"
-			}
-		}
-		if key == "id" || columns.Has(key) {
-			out = append(out, sortSpec{key: key, dir: dir})
-		}
-	}
-	return out
+func endOfDay(day time.Time) time.Time {
+	return time.Date(day.Year(), day.Month(), day.Day(), 23, 59, 59, int(999*time.Millisecond), time.UTC)
 }

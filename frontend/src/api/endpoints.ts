@@ -112,9 +112,11 @@ export async function exportData(params: URLSearchParams): Promise<Blob> {
   return data as Blob;
 }
 
-// exportSelected downloads exactly the given row ids as an .xlsx blob.
-export async function exportSelected(ids: number[]): Promise<Blob> {
+// exportSelected downloads exactly the given row ids as an .xlsx blob, limited
+// to the given (visible) column keys.
+export async function exportSelected(ids: number[], columns: string[]): Promise<Blob> {
   const params = new URLSearchParams({ ids: ids.join(',') });
+  if (columns.length > 0) params.set('columns', columns.join(','));
   const { data } = await api.get('/data/export', { params, responseType: 'blob' });
   return data as Blob;
 }

@@ -7,100 +7,102 @@ import (
 	"time"
 )
 
-func TestBuildMultiTextAndDatetimeRange(t *testing.T) {
-	vals := url.Values{}
-	vals.Set("f_rps", "ПВ,ЦС")
-	vals.Set("f_operation_date_from", "2026-09-01")
-	vals.Set("f_operation_date_to", "2026-09-02")
-
-	got := Build(vals)
-
-	wantCount := `SELECT COUNT(*) FROM dislocation WHERE ` +
-		`("rps" ILIKE $1 OR "rps" ILIKE $2) AND ` +
-		`("operation_date" >= $3 AND "operation_date" <= $4)`
-	if got.CountSQL != wantCount {
-		t.Fatalf("CountSQL mismatch:\n got: %s\nwant: %s", got.CountSQL, wantCount)
-	}
-
-	if !strings.HasSuffix(got.DataSQL, "ORDER BY id ASC LIMIT 50 OFFSET 0") {
-		t.Fatalf("DataSQL suffix mismatch: %s", got.DataSQL)
-	}
-	if !strings.HasPrefix(got.DataSQL, `SELECT id, "wagon_number",`) {
-		t.Fatalf("DataSQL prefix mismatch: %s", got.DataSQL)
-	}
-
-	if len(got.Args) != 4 {
-		t.Fatalf("expected 4 args, got %d: %v", len(got.Args), got.Args)
-	}
-	if got.Args[0] != "%ПВ%" {
-		t.Fatalf("arg0 = %v, want %%ПВ%%", got.Args[0])
-	}
-	if got.Args[1] != "%ЦС%" {
-		t.Fatalf("arg1 = %v, want %%ЦС%%", got.Args[1])
-	}
-	wantFrom := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
-	if a, ok := got.Args[2].(time.Time); !ok || !a.Equal(wantFrom) {
-		t.Fatalf("arg2 = %v, want %s", got.Args[2], wantFrom)
-	}
-	wantTo := time.Date(2026, 9, 2, 23, 59, 59, int(999*time.Millisecond), time.UTC)
-	if a, ok := got.Args[3].(time.Time); !ok || !a.Equal(wantTo) {
-		t.Fatalf("arg3 = %v, want %s", got.Args[3], wantTo)
-	}
-
-	if got.Page != 1 || got.PageSize != 50 {
-		t.Fatalf("page/pageSize = %d/%d, want 1/50", got.Page, got.PageSize)
-	}
-}
-
-func TestBuildIntegerFilterSkipsNonNumericAndPaging(t *testing.T) {
-	vals := url.Values{}
-	vals.Set("f_wagon_number", "123,abc,456")
-	vals.Set("page", "3")
-	vals.Set("page_size", "100")
-	vals.Set("sort", "wagon_number:desc,bogus:asc,operation_date:asc")
-
-	got := Build(vals)
-
-	wantCount := `SELECT COUNT(*) FROM dislocation WHERE ` +
-		`("wagon_number" = $1 OR "wagon_number" = $2)`
-	if got.CountSQL != wantCount {
-		t.Fatalf("CountSQL mismatch:\n got: %s\nwant: %s", got.CountSQL, wantCount)
-	}
-	if len(got.Args) != 2 || got.Args[0] != int64(123) || got.Args[1] != int64(456) {
-		t.Fatalf("args = %v, want [123 456]", got.Args)
-	}
-	// offset = (3-1)*100 = 200; invalid sort key "bogus" dropped.
-	if !strings.HasSuffix(got.DataSQL, `ORDER BY "wagon_number" DESC, "operation_date" ASC LIMIT 100 OFFSET 200`) {
-		t.Fatalf("DataSQL ordering/paging mismatch: %s", got.DataSQL)
-	}
-}
-
-func TestBuildDefaultsAndNoFilters(t *testing.T) {
+func TestBuildCurrentModeDefault(t *testing.T) {
 	got := Build(url.Values{})
-	if got.CountSQL != "SELECT COUNT(*) FROM dislocation" {
-		t.Fatalf("empty CountSQL mismatch: %s", got.CountSQL)
+
+	// Current mode: DISTINCT ON per wagon, latest operation_date, no filter.
+	if !strings.Contains(got.DataSQL, "SELECT DISTINCT ON (wagon_number)") {
+		t.Fatalf("expected DISTINCT ON in current-mode DataSQL: %s", got.DataSQL)
 	}
-	if !strings.HasSuffix(got.DataSQL, "ORDER BY id ASC LIMIT 50 OFFSET 0") {
-		t.Fatalf("default DataSQL suffix mismatch: %s", got.DataSQL)
+	if !strings.Contains(got.DataSQL, "ORDER BY wagon_number, operation_date DESC NULLS LAST") {
+		t.Fatalf("expected inner desc order: %s", got.DataSQL)
+	}
+	if !strings.HasSuffix(got.DataSQL, "ORDER BY wagon_number ASC, operation_date ASC LIMIT 50 OFFSET 0") {
+		t.Fatalf("expected outer asc order + paging: %s", got.DataSQL)
+	}
+	if got.CountSQL != "SELECT COUNT(DISTINCT wagon_number) FROM dislocation" {
+		t.Fatalf("count mismatch: %s", got.CountSQL)
 	}
 	if len(got.Args) != 0 {
 		t.Fatalf("expected no args, got %v", got.Args)
 	}
 }
 
-func TestBuildDateSingleDayOnDateColumn(t *testing.T) {
+func TestBuildCurrentModeWithWagons(t *testing.T) {
 	vals := url.Values{}
-	// planned_repair_date is a DATE column (search=range).
-	vals.Set("f_planned_repair_date", "2028-02-08")
+	vals.Set("wagons", "123, 456 , abc,123") // dupes + non-numeric ignored
 	got := Build(vals)
-	wantCount := `SELECT COUNT(*) FROM dislocation WHERE ` +
-		`("planned_repair_date" >= $1 AND "planned_repair_date" <= $2)`
-	if got.CountSQL != wantCount {
-		t.Fatalf("CountSQL mismatch:\n got: %s\nwant: %s", got.CountSQL, wantCount)
+
+	if !strings.Contains(got.DataSQL, "wagon_number = ANY($1)") {
+		t.Fatalf("expected wagon filter: %s", got.DataSQL)
 	}
-	// For a DATE column, upper bound is the day itself (no end-of-day time).
-	wantDay := time.Date(2028, 2, 8, 0, 0, 0, 0, time.UTC)
-	if a, ok := got.Args[1].(time.Time); !ok || !a.Equal(wantDay) {
-		t.Fatalf("arg1 = %v, want %s", got.Args[1], wantDay)
+	if got.CountSQL != "SELECT COUNT(DISTINCT wagon_number) FROM dislocation WHERE wagon_number = ANY($1)" {
+		t.Fatalf("count mismatch: %s", got.CountSQL)
+	}
+	if len(got.Args) != 1 {
+		t.Fatalf("expected 1 arg, got %v", got.Args)
+	}
+	ids, ok := got.Args[0].([]int64)
+	if !ok || len(ids) != 2 || ids[0] != 123 || ids[1] != 456 {
+		t.Fatalf("wagon arg mismatch: %v", got.Args[0])
+	}
+}
+
+func TestBuildPeriodMode(t *testing.T) {
+	vals := url.Values{}
+	vals.Set("mode", "period")
+	vals.Set("wagons", "777")
+	vals.Set("date_from", "2026-09-01")
+	vals.Set("date_to", "2026-09-02")
+	vals.Set("page", "2")
+	vals.Set("page_size", "100")
+	got := Build(vals)
+
+	if strings.Contains(got.DataSQL, "DISTINCT ON") {
+		t.Fatalf("period mode must not use DISTINCT ON: %s", got.DataSQL)
+	}
+	if !strings.Contains(got.DataSQL, "operation_date >= $2") ||
+		!strings.Contains(got.DataSQL, "operation_date <= $3") {
+		t.Fatalf("expected date range conditions: %s", got.DataSQL)
+	}
+	if !strings.HasSuffix(got.DataSQL, "ORDER BY wagon_number ASC, operation_date ASC NULLS LAST LIMIT 100 OFFSET 100") {
+		t.Fatalf("order/paging mismatch: %s", got.DataSQL)
+	}
+	if got.CountSQL != "SELECT COUNT(*) FROM dislocation WHERE wagon_number = ANY($1) AND operation_date >= $2 AND operation_date <= $3" {
+		t.Fatalf("count mismatch: %s", got.CountSQL)
+	}
+	if len(got.Args) != 3 {
+		t.Fatalf("expected 3 args, got %v", got.Args)
+	}
+	wantFrom := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	if a, ok := got.Args[1].(time.Time); !ok || !a.Equal(wantFrom) {
+		t.Fatalf("date_from arg = %v, want %s", got.Args[1], wantFrom)
+	}
+	wantTo := time.Date(2026, 9, 2, 23, 59, 59, int(999*time.Millisecond), time.UTC)
+	if a, ok := got.Args[2].(time.Time); !ok || !a.Equal(wantTo) {
+		t.Fatalf("date_to arg = %v, want %s", got.Args[2], wantTo)
+	}
+}
+
+func TestBuildExportCurrentMode(t *testing.T) {
+	sql, args := BuildExport(url.Values{})
+	if !strings.Contains(sql, "DISTINCT ON (wagon_number)") {
+		t.Fatalf("export current mode should use DISTINCT ON: %s", sql)
+	}
+	if strings.Contains(sql, "LIMIT") {
+		t.Fatalf("export must not paginate: %s", sql)
+	}
+	if len(args) != 0 {
+		t.Fatalf("expected no args, got %v", args)
+	}
+}
+
+func TestBuildExportByIDs(t *testing.T) {
+	sql, args := BuildExportByIDs([]int64{1, 2, 3})
+	if !strings.Contains(sql, "WHERE id = ANY($1) ORDER BY id") {
+		t.Fatalf("unexpected export-by-ids SQL: %s", sql)
+	}
+	if len(args) != 1 {
+		t.Fatalf("expected 1 arg, got %v", args)
 	}
 }

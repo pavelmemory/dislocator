@@ -54,7 +54,7 @@ export default function GearMenu({ onImported }: { onImported: () => void }) {
           <div className="gear-user">
             <strong>{user?.login}</strong>
             <span className="role-tag">
-              {isAdmin ? 'администратор' : 'наблюдатель'}
+              {isAdmin ? 'Адміністратор' : 'Спостерігач'}
             </span>
           </div>
 
@@ -78,7 +78,7 @@ export default function GearMenu({ onImported }: { onImported: () => void }) {
                 signOut();
               }}
             >
-              Выйти
+              Вийти
             </button>
           </div>
         </div>
@@ -113,7 +113,7 @@ function UploadBox({ onImported }: { onImported: () => void }) {
       setResult(res);
       onImported();
     } catch (err) {
-      setError(apiErrorMessage(err, 'Не удалось загрузить файл'));
+      setError(apiErrorMessage(err, 'Не вдалося завантажити файл'));
     } finally {
       setBusy(false);
       if (inputRef.current) inputRef.current.value = '';
@@ -122,7 +122,7 @@ function UploadBox({ onImported }: { onImported: () => void }) {
 
   return (
     <div className="gear-block">
-      <h4>Загрузить файл</h4>
+      <h4>Завантажити файл</h4>
       <input
         ref={inputRef}
         type="file"
@@ -139,17 +139,17 @@ function UploadBox({ onImported }: { onImported: () => void }) {
         disabled={busy}
         onClick={() => inputRef.current?.click()}
       >
-        {busy ? 'Загрузка…' : 'Выбрать .xlsx'}
+        {busy ? 'Завантаження…' : 'Вибрати .xlsx'}
       </button>
 
       {error && <div className="alert alert-error">{error}</div>}
       {result && (
         <div className="alert alert-success">
-          Обработано строк: <strong>{result.row_count}</strong> (добавлено{' '}
-          {result.inserted}, обновлено {result.updated})
+          Оброблено рядків: <strong>{result.row_count}</strong> (додано{' '}
+          {result.inserted}, оновлено {result.updated})
           {result.warnings && result.warnings.length > 0 && (
             <details className="warnings">
-              <summary>Предупреждения ({result.warnings.length})</summary>
+              <summary>Попередження ({result.warnings.length})</summary>
               <ul>
                 {result.warnings.map((wn, i) => (
                   <li key={i}>{wn}</li>
@@ -179,7 +179,7 @@ function SignupLinkBox() {
       const res = await createSignupLink(role);
       setLink(res);
     } catch (err) {
-      setError(apiErrorMessage(err, 'Не удалось создать ссылку'));
+      setError(apiErrorMessage(err, 'Не вдалося створити посилання'));
     } finally {
       setBusy(false);
     }
@@ -198,17 +198,17 @@ function SignupLinkBox() {
 
   return (
     <div className="gear-block">
-      <h4>Пригласить пользователя</h4>
+      <h4>Запросити користувача</h4>
       <div className="row">
         <label className="field inline">
           <span>Роль</span>
           <select value={role} onChange={(e) => setRole(e.target.value as Role)}>
-            <option value="viewer">Наблюдатель</option>
-            <option value="admin">Администратор</option>
+            <option value="viewer">Спостерігач</option>
+            <option value="admin">Адміністратор</option>
           </select>
         </label>
         <button type="button" className="btn btn-primary" disabled={busy} onClick={onCreate}>
-          {busy ? 'Создание…' : 'Создать ссылку'}
+          {busy ? 'Створення…' : 'Створити посилання'}
         </button>
       </div>
 
@@ -222,7 +222,7 @@ function SignupLinkBox() {
             onFocus={(e) => e.target.select()}
           />
           <button type="button" className="btn btn-sm" onClick={copy}>
-            {copied ? 'Скопировано' : 'Копировать'}
+            {copied ? 'Скопійовано' : 'Копіювати'}
           </button>
         </div>
       )}

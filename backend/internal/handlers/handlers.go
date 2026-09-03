@@ -327,10 +327,10 @@ func (a *API) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Upsert on the business key (wagon_number, operation_station_code,
-	// operation, operation_date). A matching existing row is UPDATED (all
-	// columns + import_id) rather than duplicated. RETURNING (xmax = 0)
-	// distinguishes inserts (true) from updates (false).
+	// Upsert on the business key (wagon_number, operation_date, operation).
+	// A matching existing row is UPDATED (all columns + import_id) rather than
+	// duplicated. RETURNING (xmax = 0) distinguishes inserts (true) from
+	// updates (false).
 	upsertSQL := buildUpsertSQL()
 	batch := &pgx.Batch{}
 	for _, row := range result.Rows {
@@ -403,7 +403,7 @@ func buildUpsertSQL() string {
 
 	return fmt.Sprintf(
 		`INSERT INTO %s (%s) VALUES (%s)
-		 ON CONFLICT (wagon_number, operation_station_code, operation, operation_date)
+		 ON CONFLICT (wagon_number, operation_date, operation)
 		 DO UPDATE SET %s
 		 RETURNING (xmax = 0) AS inserted`,
 		query.Table,

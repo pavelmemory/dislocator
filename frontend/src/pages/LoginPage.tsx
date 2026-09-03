@@ -24,7 +24,7 @@ export default function LoginPage() {
       signIn(res.token, { login: res.login, role: res.role });
       navigate('/', { replace: true });
     } catch (err) {
-      setError(apiErrorMessage(err, 'Неверный логин или пароль'));
+      setError(apiErrorMessage(err, 'Не вдалося увійти'));
     } finally {
       setSubmitting(false);
     }
@@ -33,14 +33,14 @@ export default function LoginPage() {
   return (
     <div className="auth-shell">
       <form className="auth-card" onSubmit={onSubmit}>
-        <h1>Дислокатор</h1>
-        <p className="auth-subtitle">Вход в систему</p>
+        <h1>Дислокація вагонів</h1>
+        <p className="auth-subtitle">Вхід</p>
 
         {successMessage && <div className="alert alert-success">{successMessage}</div>}
         {error && <div className="alert alert-error">{error}</div>}
 
         <label className="field">
-          <span>Логин</span>
+          <span>Логін</span>
           <input
             type="text"
             value={loginValue}
@@ -63,11 +63,11 @@ export default function LoginPage() {
         </label>
 
         <button type="submit" className="btn btn-primary" disabled={submitting}>
-          {submitting ? 'Вход…' : 'Войти'}
+          {submitting ? 'Вхід…' : 'Увійти'}
         </button>
 
         <p className="auth-hint">
-          Есть ссылка-приглашение? <Link to="/register">Зарегистрироваться</Link>
+          Маєте посилання-запрошення? <Link to="/register">Зареєструватися</Link>
         </p>
       </form>
     </div>

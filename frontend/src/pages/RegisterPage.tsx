@@ -5,8 +5,8 @@ import { getSignupLink, register, type Role } from '../api/endpoints';
 import { apiErrorMessage } from '../api/client';
 
 const ROLE_LABELS: Record<Role, string> = {
-  admin: 'Администратор',
-  viewer: 'Наблюдатель',
+  admin: 'Адміністратор',
+  viewer: 'Спостерігач',
 };
 
 export default function RegisterPage() {
@@ -30,7 +30,7 @@ export default function RegisterPage() {
     e.preventDefault();
     setError(null);
     if (password.length < 4) {
-      setError('Пароль должен содержать не менее 4 символов');
+      setError('Пароль повинен містити щонайменше 4 символи');
       return;
     }
     setSubmitting(true);
@@ -38,10 +38,10 @@ export default function RegisterPage() {
       await register(token, loginValue.trim(), password);
       navigate('/login', {
         replace: true,
-        state: { message: 'Регистрация завершена. Теперь вы можете войти.' },
+        state: { message: 'Реєстрацію завершено. Увійдіть.' },
       });
     } catch (err) {
-      setError(apiErrorMessage(err, 'Не удалось завершить регистрацию'));
+      setError(apiErrorMessage(err, 'Не вдалося завершити реєстрацію'));
     } finally {
       setSubmitting(false);
     }
@@ -55,35 +55,34 @@ export default function RegisterPage() {
   return (
     <div className="auth-shell">
       <div className="auth-card">
-        <h1>Дислокатор</h1>
-        <p className="auth-subtitle">Регистрация</p>
+        <h1>Дислокація вагонів</h1>
+        <p className="auth-subtitle">Реєстрація</p>
 
         {token === '' && (
           <div className="alert alert-error">
-            Отсутствует токен приглашения. Ссылка недействительна.
+            Посилання недійсне або протерміноване
           </div>
         )}
 
         {token !== '' && linkQuery.isLoading && (
-          <div className="alert">Проверка ссылки…</div>
+          <div className="alert">Перевірка посилання…</div>
         )}
 
         {token !== '' && invalid && !linkQuery.isLoading && (
-          <div className="alert alert-error">Ссылка недействительна или истекла.</div>
+          <div className="alert alert-error">Посилання недійсне або протерміноване</div>
         )}
 
         {linkQuery.data && linkQuery.data.valid && (
           <>
             <div className="alert alert-info">
-              Вам будет назначена роль:{' '}
-              <strong>{ROLE_LABELS[linkQuery.data.role]}</strong>
+              Роль: <strong>{ROLE_LABELS[linkQuery.data.role]}</strong>
             </div>
 
             <form onSubmit={onSubmit}>
               {error && <div className="alert alert-error">{error}</div>}
 
               <label className="field">
-                <span>Логин</span>
+                <span>Логін</span>
                 <input
                   type="text"
                   value={loginValue}
@@ -95,7 +94,7 @@ export default function RegisterPage() {
               </label>
 
               <label className="field">
-                <span>Пароль (минимум 4 символа)</span>
+                <span>Пароль (щонайменше 4 символи)</span>
                 <input
                   type="password"
                   value={password}
@@ -107,14 +106,14 @@ export default function RegisterPage() {
               </label>
 
               <button type="submit" className="btn btn-primary" disabled={submitting}>
-                {submitting ? 'Регистрация…' : 'Зарегистрироваться'}
+                {submitting ? 'Реєстрація…' : 'Зареєструватися'}
               </button>
             </form>
           </>
         )}
 
         <p className="auth-hint">
-          Уже есть аккаунт? <Link to="/login">Войти</Link>
+          Вже маєте акаунт? <Link to="/login">Увійти</Link>
         </p>
       </div>
     </div>

@@ -306,8 +306,12 @@ select:focus {
 }
 .data-table {
   border-collapse: collapse;
-  width: 100%;
+  /* Width is set inline to the exact sum of column widths (see DataTable):
+     the table does not auto-stretch, and resizing a column never reflows the
+     others. */
+  width: auto;
   font-size: 13px;
+  table-layout: fixed;
 }
 .data-table th,
 .data-table td {
@@ -316,51 +320,77 @@ select:focus {
   text-align: left;
   vertical-align: top;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .data-table thead th {
   background: var(--sub-bg);
   position: sticky;
   top: 0;
+  overflow: visible;
 }
 .th-group {
   background: var(--group-bg);
   text-align: center;
   font-weight: 600;
 }
-.th-standalone,
-.th-sub {
-  min-width: 120px;
+
+/* Compact rows: minimal cell height. */
+.data-table.compact td {
+  padding: 2px 8px;
+  line-height: 1.25;
 }
-.th-inner {
+.data-table.compact th {
+  padding: 3px 8px;
+}
+
+/* Leaf header: a drag grip, the (selectable) label, a hide button and a resize
+   handle. The label text is intentionally selectable so it copies with Ctrl+C. */
+.th-leaf {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
   justify-content: space-between;
-}
-.th-sort-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: none;
-  border: none;
-  cursor: pointer;
-  font: inherit;
   font-weight: 600;
+}
+.th-drag-handle {
+  flex: none;
+  cursor: grab;
+  user-select: none;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  padding: 0 1px;
+}
+.th-drag-handle::before {
+  content: '⠿';
+}
+.th-drag-handle:hover {
   color: var(--text);
-  padding: 0;
-  text-align: left;
-  white-space: normal;
 }
-.th-sort-btn:hover {
-  color: var(--primary);
+.th-label {
+  user-select: text;
+  cursor: text;
 }
-.sort-indicator {
-  color: var(--primary);
-  font-size: 11px;
+.th-leaf.dragging {
+  opacity: 0.5;
 }
-.sort-order {
-  font-size: 9px;
-  margin-left: 1px;
+.th-leaf.drop-target {
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+/* While a column drag is in progress, keep the grabbing cursor everywhere and
+   suppress text selection. */
+body.col-dragging,
+body.col-dragging * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+.th-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
 }
 .th-hide-btn {
   background: none;
@@ -370,84 +400,44 @@ select:focus {
   font-size: 15px;
   line-height: 1;
   padding: 0 2px;
+  flex: none;
+  user-select: none;
+}
+.th-hide-btn::before {
+  content: '×';
 }
 .th-hide-btn:hover {
   color: var(--error);
 }
-
-/* filter row */
-.header-row-filters th {
-  background: #fff;
-  font-weight: normal;
+.th-resize {
+  position: absolute;
+  top: 0;
+  right: -8px;
+  width: 12px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 2;
+  user-select: none;
 }
-.filter {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 120px;
-}
-.filter-input {
-  width: 100%;
-  font-size: 12px;
-  padding: 4px 6px;
-}
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
-}
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  background: var(--chip-bg);
-  border-radius: 10px;
-  padding: 1px 4px 1px 7px;
-  font-size: 11px;
-}
-.chip-x {
-  border: none;
-  background: none;
-  cursor: pointer;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1;
-  padding: 0;
-}
-.chip-x:hover {
-  color: var(--error);
-}
-.range-mode {
-  display: flex;
-}
-.seg {
-  border: 1px solid var(--border-strong);
-  background: #fff;
-  font-size: 11px;
-  padding: 2px 6px;
-  cursor: pointer;
-}
-.seg:first-child {
-  border-radius: 4px 0 0 4px;
-}
-.seg:last-child {
-  border-radius: 0 4px 4px 0;
-  border-left: none;
-}
-.seg.active {
-  background: var(--primary);
-  color: #fff;
-  border-color: var(--primary);
-}
-.range-pair {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+.th-resize:hover {
+  background: rgba(31, 111, 235, 0.25);
 }
 
 /* body */
 .data-row:hover td {
   background: var(--row-hover);
+}
+
+/* Grey half-height separator between wagon groups. */
+.group-sep td {
+  height: 11px;
+  padding: 0;
+  background: var(--bg);
+  border-left: none;
+  border-right: none;
+}
+.group-sep:hover td {
+  background: var(--bg);
 }
 .cell-num {
   text-align: right;
@@ -584,10 +574,204 @@ mark {
   width: 100%;
 }
 
-/* ---- Date filter input ---- */
+/* ---- Filter form (above the table) ---- */
+/* Fixed 50/50 split: № вагона on the left half, the search picker on the right.
+   A stable grid (not flex-wrap) keeps the "virtual middle line" in place. */
+.filter-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  align-items: stretch;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+@media (max-width: 720px) {
+  .filter-form {
+    grid-template-columns: 1fr;
+  }
+}
+.filter-form-wagons {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  height: 100%;
+}
+.filter-form-wagons .ff-textarea {
+  flex: 1;
+}
+.ff-label {
+  font-weight: 600;
+  font-size: 13px;
+}
+.ff-hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+.ff-textarea {
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 7px 9px;
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 72px;
+  background: #fff;
+  color: var(--text);
+}
+.ff-textarea:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: -1px;
+}
+.filter-form-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ff-modes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ff-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.ff-dates {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+/* Hidden in current mode but keeps its space so the form height never changes. */
+.ff-dates-hidden {
+  visibility: hidden;
+}
+.ff-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: auto;
+}
+
+/* ---- Date field + calendar popup ---- */
+.datefield {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.datefield-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+.datefield-control {
+  display: inline-flex;
+  align-items: stretch;
+}
+.date-input {
+  width: 120px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px 0 0 6px;
+  border-right: none;
+  padding: 6px 8px;
+  font-size: 13px;
+  background: #fff;
+  color: var(--text);
+}
+.date-input:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: -1px;
+}
 .date-input.invalid {
   border-color: var(--error);
   background: var(--error-bg);
+}
+.datefield-cal-btn {
+  border: 1px solid var(--border-strong);
+  border-radius: 0 6px 6px 0;
+  background: var(--sub-bg);
+  cursor: pointer;
+  padding: 0 8px;
+  font-size: 14px;
+  line-height: 1;
+}
+.datefield-cal-btn:hover {
+  background: #eef2f7;
+}
+.cal-popup {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 60;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.14);
+  padding: 8px;
+  width: 232px;
+}
+.cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.cal-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.cal-nav {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 5px;
+  cursor: pointer;
+  width: 26px;
+  height: 26px;
+  font-size: 15px;
+  line-height: 1;
+}
+.cal-nav:hover {
+  background: var(--sub-bg);
+}
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+.cal-weekdays {
+  margin-bottom: 2px;
+}
+.cal-weekday {
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted);
+  padding: 2px 0;
+}
+.cal-cell {
+  height: 28px;
+}
+.cal-empty {
+  visibility: hidden;
+}
+.cal-day {
+  border: none;
+  background: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text);
+}
+.cal-day:hover {
+  background: var(--row-hover);
+}
+.cal-day.selected {
+  background: var(--primary);
+  color: #fff;
 }
 
 /* ---- Row selection ---- */

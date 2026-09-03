@@ -98,29 +98,37 @@ Base path `/api`. All JSON. Errors: `{ "error": "message" }` with appropriate st
 ### Upload / parse rules
 - Accept `.xlsx`. Parse sheet `Висновок` (or first sheet). Skip rows 1–2. For each data row where `№ вагона` (xlsx col 2) is non-empty, map xlsx_col → key per columns.json, coercing to the column type. Trim text. Cells that fail integer/date coercion when the cell is non-empty → record a row-level warning but still import the row with NULL for that cell (don't abort the whole file). Create one `imports` row; insert all data rows with that `import_id` (**append**, never delete existing). Return `row_count`.
 
-## 5. `GET /api/data` — query semantics
+## 5. `GET /api/data` — query semantics (v2)
+
+Filtering is limited to **№ вагона** (`wagon_number`) and **дата операции**
+(`operation_date`). There is no per-column filtering or per-column sorting.
+Ordering is ALWAYS `wagon_number ASC, operation_date ASC`.
 
 Query params:
+- `wagons` — comma-separated list of wagon numbers (integers). Optional; empty = all wagons. Non-numeric tokens ignored, duplicates removed.
+- `mode` — `current` (default) or `period`.
+  - **`current`** (поточна дислокація): the single most recent row per wagon — `DISTINCT ON (wagon_number) ... ORDER BY wagon_number, operation_date DESC`, then ordered `wagon_number ASC, operation_date ASC`. `total` = count of distinct matching wagons.
+  - **`period`** (дислокація за період): every row whose `operation_date` is within the inclusive range. `total` = count of matching rows.
+- `date_from`, `date_to` — `YYYY-MM-DD`, used only in `period` mode. Inclusive; `date_to` covers the whole day (end at 23:59:59.999). Either may be omitted for an open bound.
 - `page` (1-based, default 1), `page_size` (default 50; allowed 25,50,100,200).
-- Sorting: `sort=key1:asc,key2:desc,...` — applied in order. Invalid keys ignored. Default sort `id:asc`.
-- Filtering, per column `key`:
-  - **text / integer (`search=multi`)**: `f_<key>=v1,v2,v3` — OR of values. Text → case-insensitive **contains** (`ILIKE '%v%'`). Integer → exact match (`= v`); non-numeric values in the list are ignored. Values are comma-separated; a literal comma can be omitted (prototype).
-  - **date / datetime (`search=range`)**: single value `f_<key>=YYYY-MM-DD` (matches that whole day) OR range `f_<key>_from=YYYY-MM-DD&f_<key>_to=YYYY-MM-DD` (**inclusive**). For datetime columns, `from` = start of day, `to` = end of day (23:59:59.999). Either bound may be omitted for open-ended.
-- All active filters are AND-combined across columns.
-- Response `rows`: array of objects keyed by column `key`. Date/datetime returned as **ISO 8601 strings** (`2026-09-01T06:23:00`), integers as numbers, text as strings, missing as `null`. Also include `id`.
-- `total` = count matching filters (ignoring pagination).
+- Response `rows`: array of objects keyed by column `key`. Datetimes as **ISO 8601 strings** (`2026-09-01T06:23:00`), integers as numbers, text as strings, missing as `null`. Also include `id`.
+
+Export (`GET /api/data/export`) honors the same `wagons`/`mode`/`date_from`/`date_to` params (no pagination), or `ids=1,2,3` to export a manual selection.
 
 ## 6. Frontend URL sharing
 
-The table view state that IS shareable (encoded in the URL query string, reproduced on load): all column filters, sort spec, page, page_size. Column show/hide is **NOT** shared — it is a per-browser preference in `localStorage`. The frontend uses the same param names as the API where practical so the URL is the query.
+Shareable state (encoded in the URL query string, reproduced on load): `wagons`, `mode`, `date_from`, `date_to`, `page`, `page_size`. Per-user table layout — column **order**, **widths**, and **show/hide** — is NOT shared; it is a per-user `localStorage` preference.
 
-## 7. Frontend behavior notes
+## 7. Frontend behavior notes (v2)
 
-- Language: Russian throughout.
-- Table: two-level header when `group` is set (group cell spans its consecutive sub-columns). Row hover highlight. Search-term highlight in matched text cells.
-- Show/hide columns: toggled from the table header UI, persisted in `localStorage`. A "Показать скрытые столбцы" control reveals all hidden columns.
+- Language: **Ukrainian** for all UI chrome. The data **column names stay unchanged** (the original Russian labels from `columns.json`).
+- Filter form on top (not per-column): a textarea to paste multiple `№ вагона` values separated by spaces/newlines/tabs/commas (any combination), plus two radio modes — `поточна дислокація` (current) and `дислокація за період` (period, which reveals `Дата з` / `Дата по` date pickers shown as `dd.mm.yyyy` with a calendar + manual entry).
+- Table header keeps the two-level group layout (`ВРП ВУ-23` / `ВРП ВУ-36`). No per-column filter row, no sort controls.
+- Columns can be **reordered by drag** and **resized by dragging their border**; order + widths + show/hide are persisted per user in `localStorage` (keyed by login).
+- Results are visually **grouped by `wagon_number`**: consecutive rows of the same wagon form a group, and groups are separated by a greyed spacer row half the height of a normal cell.
+- **Compact rows** (minimal cell height).
 - Pagination controls with page size selector (25/50/100/200), default 50.
-- Admin-only UI: "Загрузить файл" upload button + "Создать ссылку" (signup link generator with role choice, shows copyable URL).
+- Admin actions live in the gear menu (upload, invite). Row selection + delete (admin) + export selected remain.
 - Dates `DD.MM.YYYY`, datetimes `DD.MM.YYYY HH:mm`.
 
 ## 8. Env vars

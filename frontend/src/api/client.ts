@@ -65,7 +65,7 @@ api.interceptors.response.use(
 );
 
 // Extract a human-readable message from an axios error ({ error: "..." }).
-export function apiErrorMessage(err: unknown, fallback = 'Произошла ошибка'): string {
+export function apiErrorMessage(err: unknown, fallback = 'Сталася помилка'): string {
   if (axios.isAxiosError(err)) {
     const data = err.response?.data as { error?: string } | undefined;
     if (data?.error) return data.error;

@@ -46,6 +46,10 @@ func TestBuildCurrentModeWithWagons(t *testing.T) {
 	if !ok || len(ids) != 2 || ids[0] != 123 || ids[1] != 456 {
 		t.Fatalf("wagon arg mismatch: %v", got.Args[0])
 	}
+	// With a wagon list, cross-wagon order follows the input list order.
+	if !strings.Contains(got.DataSQL, "ORDER BY array_position($1, wagon_number), operation_date ASC") {
+		t.Fatalf("expected input-order sort: %s", got.DataSQL)
+	}
 }
 
 func TestBuildPeriodMode(t *testing.T) {
@@ -65,7 +69,7 @@ func TestBuildPeriodMode(t *testing.T) {
 		!strings.Contains(got.DataSQL, "operation_date <= $3") {
 		t.Fatalf("expected date range conditions: %s", got.DataSQL)
 	}
-	if !strings.HasSuffix(got.DataSQL, "ORDER BY wagon_number ASC, operation_date ASC NULLS LAST LIMIT 100 OFFSET 100") {
+	if !strings.HasSuffix(got.DataSQL, "ORDER BY array_position($1, wagon_number), operation_date ASC NULLS LAST LIMIT 100 OFFSET 100") {
 		t.Fatalf("order/paging mismatch: %s", got.DataSQL)
 	}
 	if got.CountSQL != "SELECT COUNT(*) FROM dislocation WHERE wagon_number = ANY($1) AND operation_date >= $2 AND operation_date <= $3" {

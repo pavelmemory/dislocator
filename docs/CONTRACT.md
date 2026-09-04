@@ -102,7 +102,7 @@ Base path `/api`. All JSON. Errors: `{ "error": "message" }` with appropriate st
 
 Filtering is limited to **№ вагона** (`wagon_number`) and **дата операции**
 (`operation_date`). There is no per-column filtering or per-column sorting.
-Ordering is ALWAYS `wagon_number ASC, operation_date ASC`.
+Ordering: within each wagon, `operation_date ASC`. Across wagons, rows follow the **order the wagons were entered** in the `wagons` list (`array_position`); when no wagon list is given, wagons fall back to `wagon_number ASC`.
 
 Query params:
 - `wagons` — comma-separated list of wagon numbers (integers). Optional; empty = all wagons. Non-numeric tokens ignored, duplicates removed.

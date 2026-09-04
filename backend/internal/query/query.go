@@ -49,11 +49,11 @@ func Build(vals url.Values) Built {
 		pageSize = ps
 	}
 
-	conds, args := buildConditions(vals)
+	conds, args, wagonPos := buildConditions(vals)
 	where := whereClause(conds)
 	current := isCurrent(vals)
 
-	core := coreSelect(current, where)
+	core := coreSelect(current, where, wagonPos)
 	offset := (page - 1) * pageSize
 	dataSQL := fmt.Sprintf("%s LIMIT %d OFFSET %d", core, pageSize, offset)
 
@@ -77,9 +77,9 @@ func Build(vals url.Values) Built {
 // BuildExport builds SQL selecting id + all columns for every matching row
 // (no pagination), honoring the same filters/mode/order as Build.
 func BuildExport(vals url.Values) (string, []interface{}) {
-	conds, args := buildConditions(vals)
+	conds, args, wagonPos := buildConditions(vals)
 	where := whereClause(conds)
-	return coreSelect(isCurrent(vals), where), args
+	return coreSelect(isCurrent(vals), where, wagonPos), args
 }
 
 // BuildExportByIDs builds SQL selecting id + all columns for the given row ids,
@@ -90,18 +90,31 @@ func BuildExportByIDs(ids []int64) (string, []interface{}) {
 }
 
 // coreSelect returns the ordered, un-paginated SELECT for the given mode.
-func coreSelect(current bool, where string) string {
+//
+// Row order: within each wagon, operation_date ASC. Across wagons, when a wagon
+// list was provided (wagonPos > 0) rows follow the order the wagons were entered
+// (array_position in that list); otherwise they fall back to wagon_number ASC.
+func coreSelect(current bool, where string, wagonPos int) string {
 	cols := selectList()
+
+	// Leading ORDER BY expression for the wagon grouping.
+	wagonOrder := "wagon_number ASC"
+	if wagonPos > 0 {
+		wagonOrder = fmt.Sprintf("array_position($%d, wagon_number)", wagonPos)
+	}
+
 	if current {
+		// DISTINCT ON keeps the latest row per wagon (inner order picks it); the
+		// outer query then arranges the wagons in the requested order.
 		inner := fmt.Sprintf(
 			"SELECT DISTINCT ON (wagon_number) %s FROM %s%s ORDER BY wagon_number, operation_date DESC NULLS LAST",
 			cols, Table, where,
 		)
-		return fmt.Sprintf("SELECT * FROM (%s) t ORDER BY wagon_number ASC, operation_date ASC", inner)
+		return fmt.Sprintf("SELECT * FROM (%s) t ORDER BY %s, operation_date ASC", inner, wagonOrder)
 	}
 	return fmt.Sprintf(
-		"SELECT %s FROM %s%s ORDER BY wagon_number ASC, operation_date ASC NULLS LAST",
-		cols, Table, where,
+		"SELECT %s FROM %s%s ORDER BY %s, operation_date ASC NULLS LAST",
+		cols, Table, where, wagonOrder,
 	)
 }
 
@@ -118,8 +131,10 @@ func whereClause(conds []string) string {
 }
 
 // buildConditions builds the WHERE conditions and positional args, in a
-// deterministic order so DataSQL and CountSQL can share the same args.
-func buildConditions(vals url.Values) ([]string, []interface{}) {
+// deterministic order so DataSQL and CountSQL can share the same args. It also
+// returns wagonPos: the 1-based positional-arg index of the wagons array (or 0
+// if no wagon list was given), used by ORDER BY to sort by input order.
+func buildConditions(vals url.Values) ([]string, []interface{}, int) {
 	var conds []string
 	var args []interface{}
 	ph := func(v interface{}) string {
@@ -127,8 +142,11 @@ func buildConditions(vals url.Values) ([]string, []interface{}) {
 		return "$" + strconv.Itoa(len(args))
 	}
 
+	wagonPos := 0
 	if wagons := parseWagons(vals.Get("wagons")); len(wagons) > 0 {
-		conds = append(conds, "wagon_number = ANY("+ph(wagons)+")")
+		placeholder := ph(wagons) // e.g. "$1"
+		wagonPos, _ = strconv.Atoi(strings.TrimPrefix(placeholder, "$"))
+		conds = append(conds, "wagon_number = ANY("+placeholder+")")
 	}
 
 	if !isCurrent(vals) {
@@ -144,7 +162,7 @@ func buildConditions(vals url.Values) ([]string, []interface{}) {
 		}
 	}
 
-	return conds, args
+	return conds, args, wagonPos
 }
 
 // parseWagons parses a comma-separated list of wagon numbers into a

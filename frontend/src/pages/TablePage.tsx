@@ -154,7 +154,7 @@ export default function TablePage() {
       const db = String(b.operation_date ?? '');
       return da < db ? -1 : da > db ? 1 : 0;
     });
-    const ok = await copyTableToClipboard(toCopy, visibleColumns);
+    const ok = await copyTableToClipboard(toCopy, visibleColumns, state.mode === 'period');
     if (ok) {
       setCopiedTable(true);
       setTimeout(() => setCopiedTable(false), 2000);
@@ -248,7 +248,7 @@ export default function TablePage() {
     <div className="app">
       <header className="app-header">
         <div className="app-title">
-          <h1>Дислокація вагонів</h1>
+          <h1>Дислокатор</h1>
         </div>
         <div className="app-header-right">
           <GearMenu onImported={() => dataQuery.refetch()} />
@@ -341,6 +341,7 @@ export default function TablePage() {
         onMoveColumn={moveColumn}
         hideColumn={toggleColumn}
         loading={dataQuery.isLoading}
+        groupSeparators={state.mode === 'period'}
         selectedIds={selectedIds}
         onToggleRow={toggleRow}
         onToggleAllPage={toggleAllPage}

@@ -18,6 +18,9 @@ interface Props {
   onMoveColumn: (fromKey: string, toKey: string) => void;
   hideColumn: (key: string) => void;
   loading: boolean;
+  // Grey separators between wagon groups. Off in "current" mode (each row is a
+  // unique wagon, so separators would just add blank lines).
+  groupSeparators: boolean;
   // Row selection.
   selectedIds: Set<number>;
   onToggleRow: (id: number, checked: boolean) => void;
@@ -34,6 +37,7 @@ export default function DataTable({
   onMoveColumn,
   hideColumn,
   loading,
+  groupSeparators,
   selectedIds,
   onToggleRow,
   onToggleAllPage,
@@ -284,7 +288,7 @@ export default function DataTable({
             const checked = selectedIds.has(id);
             const wagon = row.wagon_number;
             const prevWagon = idx > 0 ? rows[idx - 1].wagon_number : undefined;
-            const showSep = idx > 0 && wagon !== prevWagon;
+            const showSep = groupSeparators && idx > 0 && wagon !== prevWagon;
             return (
               <Fragment key={id}>
                 {showSep && (

@@ -30,9 +30,13 @@ interface Span {
 }
 
 // Build the HTML + plain-text representations of the given rows/columns.
+// When groupSeparators is true, a grey spacer row is inserted between wagon
+// groups (used in period mode); in current mode it is off so there are no blank
+// lines between copied rows.
 export function buildTableHtml(
   rows: DataRow[],
   cols: ColumnMeta[],
+  groupSeparators = true,
 ): { html: string; text: string } {
   // Group consecutive columns sharing the same group for the top header row.
   const spans: Span[] = [];
@@ -70,7 +74,7 @@ export function buildTableHtml(
   rows.forEach((row, idx) => {
     const wagon = row.wagon_number;
     // Grey separator row between wagon groups (mirrors the on-screen grouping).
-    if (idx > 0 && wagon !== prevWagon) {
+    if (groupSeparators && idx > 0 && wagon !== prevWagon) {
       tbody += `<tr><td colspan="${colCount}" style="${SEP_STYLE}"></td></tr>`;
     }
     prevWagon = wagon;
@@ -96,8 +100,9 @@ export function buildTableHtml(
 export async function copyTableToClipboard(
   rows: DataRow[],
   cols: ColumnMeta[],
+  groupSeparators = true,
 ): Promise<boolean> {
-  const { html, text } = buildTableHtml(rows, cols);
+  const { html, text } = buildTableHtml(rows, cols, groupSeparators);
 
   // Preferred: rich clipboard write (text/html + text/plain).
   try {

@@ -141,19 +141,31 @@ export default function TablePage() {
   const visibleKeys = visibleColumns.map((c) => c.key);
 
   // Copy as a formatted table (text/html + text/plain) so it pastes into Gmail
-  // as a rendered table. If any rows are selected, copy exactly those (across
-  // pages); otherwise copy everything shown on the current page. Rows are sorted
-  // by wagon then date so the group separators render correctly.
+  // as a rendered table. If any rows are selected, copy exactly those; otherwise
+  // copy everything shown on the current page. Row order must MATCH the WebUI:
+  //  - no selection: `rows` is already in display order → copy as-is;
+  //  - with selection: reorder the selected rows to the display order, i.e. by
+  //    the entered wagon-list order (or wagon_number asc when no list), then
+  //    operation_date asc.
   async function onCopyTable() {
-    const source = selectedRows.size > 0 ? [...selectedRows.values()] : rows;
-    const toCopy = [...source].sort((a, b) => {
-      const wa = Number(a.wagon_number) || 0;
-      const wb = Number(b.wagon_number) || 0;
-      if (wa !== wb) return wa - wb;
-      const da = String(a.operation_date ?? '');
-      const db = String(b.operation_date ?? '');
-      return da < db ? -1 : da > db ? 1 : 0;
-    });
+    let toCopy: DataRow[];
+    if (selectedRows.size > 0) {
+      const wagonIdx = new Map(state.wagons.map((w, i) => [w, i]));
+      const wagonKey = (r: DataRow) =>
+        state.wagons.length > 0
+          ? (wagonIdx.get(String(r.wagon_number)) ?? Number.MAX_SAFE_INTEGER)
+          : Number(r.wagon_number) || 0;
+      toCopy = [...selectedRows.values()].sort((a, b) => {
+        const wa = wagonKey(a);
+        const wb = wagonKey(b);
+        if (wa !== wb) return wa - wb;
+        const da = String(a.operation_date ?? '');
+        const db = String(b.operation_date ?? '');
+        return da < db ? -1 : da > db ? 1 : 0;
+      });
+    } else {
+      toCopy = rows;
+    }
     const ok = await copyTableToClipboard(toCopy, visibleColumns, state.mode === 'period');
     if (ok) {
       setCopiedTable(true);

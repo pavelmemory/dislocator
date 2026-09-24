@@ -117,14 +117,14 @@ Export (`GET /api/data/export`) honors the same `wagons`/`mode`/`date_from`/`dat
 
 ## 6. Frontend URL sharing
 
-Shareable state (encoded in the URL query string, reproduced on load): `wagons`, `mode`, `date_from`, `date_to`, `page`, `page_size`. Per-user table layout — column **order**, **widths**, and **show/hide** — is NOT shared; it is a per-user `localStorage` preference.
+Shareable state (encoded in the URL query string, reproduced on load): `wagons`, `mode`, `date_from`, `date_to`, `page`, `page_size`. Per-user table layout — column **order**, **widths**, and **show/hide** — is NOT shared via the URL; it is stored **server-side per account** (`GET`/`PUT /api/preferences`, under the `columnLayout` key), so it follows the user across browsers/devices. `localStorage` is kept only as an instant cache; the server value wins on load.
 
 ## 7. Frontend behavior notes (v2)
 
 - Language: **Ukrainian** for all UI chrome. The data **column names stay unchanged** (the original Russian labels from `columns.json`).
 - Filter form on top (not per-column): a textarea to paste multiple `№ вагона` values separated by spaces/newlines/tabs/commas (any combination), plus two radio modes — `поточна дислокація` (current) and `дислокація за період` (period, which reveals `Дата з` / `Дата по` date pickers shown as `dd.mm.yyyy` with a calendar + manual entry).
 - Table header keeps the two-level group layout (`ВРП ВУ-23` / `ВРП ВУ-36`). No per-column filter row, no sort controls.
-- Columns can be **reordered by drag** and **resized by dragging their border**; order + widths + show/hide are persisted per user in `localStorage` (keyed by login).
+- Columns can be **reordered by drag** and **resized by dragging their border**; order + widths + show/hide are persisted per user **server-side** (via `/api/preferences`), cached in `localStorage`.
 - Results are visually **grouped by `wagon_number`**: consecutive rows of the same wagon form a group, and groups are separated by a greyed spacer row half the height of a normal cell.
 - **Compact rows** (minimal cell height).
 - Pagination controls with page size selector (25/50/100/200), default 50.

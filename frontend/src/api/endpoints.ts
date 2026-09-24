@@ -126,3 +126,16 @@ export async function deleteData(ids: number[]): Promise<DeleteResponse> {
   const { data } = await api.post<DeleteResponse>('/admin/data/delete', { ids });
   return data;
 }
+
+// --- user UI preferences (server-side, per account) ---
+
+// getPreferences returns the current user's saved preferences object ({} if none).
+export async function getPreferences(): Promise<Record<string, unknown>> {
+  const { data } = await api.get<{ prefs?: Record<string, unknown> }>('/preferences');
+  return (data?.prefs ?? {}) as Record<string, unknown>;
+}
+
+// savePreferences stores the current user's preferences object.
+export async function savePreferences(prefs: unknown): Promise<void> {
+  await api.put('/preferences', prefs);
+}

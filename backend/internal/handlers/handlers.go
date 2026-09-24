@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -484,6 +485,61 @@ func (a *API) DeleteData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"deleted": tag.RowsAffected()})
+}
+
+// --- user preferences (server-side, per account) ---
+
+// GetPreferences returns the current user's saved UI preferences (opaque JSON
+// object), or {} if none are stored yet.
+func (a *API) GetPreferences(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.FromContext(r.Context())
+
+	var raw []byte
+	err := a.Pool.QueryRow(r.Context(),
+		`SELECT prefs FROM user_preferences WHERE login=$1`, claims.Subject,
+	).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		raw = []byte(`{}`)
+	} else if err != nil {
+		writeErr(w, http.StatusInternalServerError, "database error")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	// { "prefs": <stored json> }
+	_, _ = w.Write([]byte(`{"prefs":`))
+	_, _ = w.Write(raw)
+	_, _ = w.Write([]byte("}"))
+}
+
+// SavePreferences stores the current user's UI preferences. The body must be a
+// JSON object; it is stored opaquely (the server does not interpret its shape).
+func (a *API) SavePreferences(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.FromContext(r.Context())
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 256<<10)) // 256 KiB cap
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "cannot read body")
+		return
+	}
+	// Validate it is a JSON object (reject arrays/strings/etc).
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(body, &probe); err != nil {
+		writeErr(w, http.StatusBadRequest, "preferences must be a JSON object")
+		return
+	}
+
+	if _, err := a.Pool.Exec(r.Context(),
+		`INSERT INTO user_preferences(login, prefs, updated_at)
+		 VALUES($1, $2::jsonb, now())
+		 ON CONFLICT (login) DO UPDATE SET prefs=EXCLUDED.prefs, updated_at=now()`,
+		claims.Subject, string(body),
+	); err != nil {
+		writeErr(w, http.StatusInternalServerError, "cannot save preferences")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // formatValue converts DB values to JSON-friendly forms: dates/datetimes to

@@ -73,6 +73,8 @@ func main() {
 			r.Get("/auth/me", api.Me)
 			r.Get("/data", api.Data)
 			r.Get("/data/export", api.Export)
+			r.Get("/preferences", api.GetPreferences)
+			r.Put("/preferences", api.SavePreferences)
 
 			// Admin-only.
 			r.Group(func(r chi.Router) {

@@ -1,12 +1,18 @@
-// Per-user, per-browser column layout preferences, persisted in localStorage
-// (CONTRACT §6/§7). NOT part of the shareable URL state.
+// Per-user column layout preferences (visibility, order, widths). NOT part of
+// the shareable URL state.
 //
 // Stored shape: { order: string[], widths: Record<string, number>, hidden: string[] }
-// The storage key is namespaced by the current user's login so one user's layout
-// never affects another signing in on the same browser.
-import { useCallback, useEffect, useState } from 'react';
+// Persistence is server-side (per account) so a user's configured table view
+// follows them across browsers and devices; localStorage is kept as an instant
+// cache to avoid a flash on load and to work offline. On load the server value
+// wins; a local-only config is migrated up to the server the first time.
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from './auth';
+import { getPreferences, savePreferences } from '../api/endpoints';
 import { COLUMNS, COLUMN_BY_KEY, type ColumnMeta } from './columns';
+
+// Key under which the column layout lives inside the server prefs object.
+const PREFS_KEY = 'columnLayout';
 
 const PREFIX = 'dislocator.columnPrefs';
 export const MIN_COL_WIDTH = 60;
@@ -45,26 +51,42 @@ function normalizeOrder(saved: unknown): string[] {
   return result;
 }
 
+// Validate/normalize an arbitrary object into ColumnPrefs (from any source).
+function parsePrefs(parsed: unknown): ColumnPrefs {
+  const p = (parsed ?? {}) as Partial<ColumnPrefs>;
+  const widths: Record<string, number> = {};
+  if (p.widths && typeof p.widths === 'object') {
+    for (const [k, v] of Object.entries(p.widths)) {
+      if (k in COLUMN_BY_KEY && typeof v === 'number' && v > 0) widths[k] = v;
+    }
+  }
+  const hidden = Array.isArray(p.hidden)
+    ? p.hidden.filter((k): k is string => typeof k === 'string' && k in COLUMN_BY_KEY)
+    : [];
+  return { order: normalizeOrder(p.order), widths, hidden };
+}
+
+function defaultPrefs(): ColumnPrefs {
+  return { order: [...DEFAULT_ORDER], widths: {}, hidden: [] };
+}
+
+function isDefaultPrefs(p: ColumnPrefs): boolean {
+  return (
+    p.hidden.length === 0 &&
+    Object.keys(p.widths).length === 0 &&
+    p.order.length === DEFAULT_ORDER.length &&
+    p.order.every((k, i) => k === DEFAULT_ORDER[i])
+  );
+}
+
 function readPrefs(key: string): ColumnPrefs {
   try {
     const raw = localStorage.getItem(key);
-    if (raw) {
-      const parsed = JSON.parse(raw) as Partial<ColumnPrefs>;
-      const widths: Record<string, number> = {};
-      if (parsed.widths && typeof parsed.widths === 'object') {
-        for (const [k, v] of Object.entries(parsed.widths)) {
-          if (k in COLUMN_BY_KEY && typeof v === 'number' && v > 0) widths[k] = v;
-        }
-      }
-      const hidden = Array.isArray(parsed.hidden)
-        ? parsed.hidden.filter((k): k is string => typeof k === 'string' && k in COLUMN_BY_KEY)
-        : [];
-      return { order: normalizeOrder(parsed.order), widths, hidden };
-    }
+    if (raw) return parsePrefs(JSON.parse(raw));
   } catch {
     /* ignore */
   }
-  return { order: [...DEFAULT_ORDER], widths: {}, hidden: [] };
+  return defaultPrefs();
 }
 
 function writePrefs(key: string, prefs: ColumnPrefs): void {
@@ -81,9 +103,51 @@ export function useColumnPrefs() {
 
   const [prefs, setPrefs] = useState<ColumnPrefs>(() => readPrefs(storageKey(login)));
 
-  // Reload this user's own saved prefs when the signed-in user changes.
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Push the layout to the server (debounced), merging into the prefs object so
+  // future preference kinds can share the same record.
+  const scheduleServerSave = useCallback(
+    (next: ColumnPrefs) => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => {
+        savePreferences({ [PREFS_KEY]: next }).catch(() => {
+          /* offline / transient — localStorage still holds the value */
+        });
+      }, 600);
+    },
+    [],
+  );
+
+  // On login (or user change): show the cached local layout instantly, then load
+  // the authoritative server copy. Server wins; if the server has nothing but a
+  // local layout exists, migrate the local one up.
   useEffect(() => {
-    setPrefs(readPrefs(storageKey(login)));
+    const local = readPrefs(storageKey(login));
+    setPrefs(local);
+    if (!login) return;
+
+    let cancelled = false;
+    getPreferences()
+      .then((obj) => {
+        if (cancelled) return;
+        const serverLayout = (obj as Record<string, unknown>)[PREFS_KEY];
+        if (serverLayout !== undefined && serverLayout !== null) {
+          const parsed = parsePrefs(serverLayout);
+          setPrefs(parsed);
+          writePrefs(storageKey(login), parsed);
+        } else if (!isDefaultPrefs(local)) {
+          // Server has no saved layout yet but the browser does — migrate it up.
+          savePreferences({ [PREFS_KEY]: local }).catch(() => {});
+        }
+      })
+      .catch(() => {
+        /* keep the local cache */
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [login]);
 
   const update = useCallback(
@@ -91,10 +155,11 @@ export function useColumnPrefs() {
       setPrefs((prev) => {
         const next = fn(prev);
         writePrefs(storageKey(login), next);
+        scheduleServerSave(next);
         return next;
       });
     },
-    [login],
+    [login, scheduleServerSave],
   );
 
   const hiddenSet = new Set(prefs.hidden);
@@ -167,11 +232,7 @@ export function useColumnPrefs() {
     [update],
   );
 
-  const isDefaultLayout =
-    prefs.hidden.length === 0 &&
-    Object.keys(prefs.widths).length === 0 &&
-    prefs.order.length === DEFAULT_ORDER.length &&
-    prefs.order.every((k, i) => k === DEFAULT_ORDER[i]);
+  const isDefaultLayout = isDefaultPrefs(prefs);
 
   return {
     orderedColumns,

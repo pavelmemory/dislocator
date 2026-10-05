@@ -79,6 +79,17 @@ export default function DataTable({
     if (colSel.size === 0) return;
     const cols = [...colSel].sort((a, b) => a - b);
 
+    // Single cell selected → copy just its value, with no header line.
+    if (bodyRows.length === 1 && cols.length === 1) {
+      const tds = bodyRows[0].querySelectorAll<HTMLTableCellElement>(
+        'td.cell:not(.cell-select)',
+      );
+      const value = (tds[cols[0]]?.textContent ?? '').trim();
+      e.clipboardData.setData('text/plain', value);
+      e.preventDefault();
+      return;
+    }
+
     const header = cols.map((i) => visibleCols[i]?.label ?? '').join('\t');
     const lines = bodyRows.map((tr) => {
       const tds = tr.querySelectorAll<HTMLTableCellElement>('td.cell:not(.cell-select)');
